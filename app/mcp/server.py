@@ -1,7 +1,6 @@
 import logging
 import sys
 
-
 logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stderr)])
 
 import argparse
@@ -11,12 +10,30 @@ import json
 from inspect import Parameter, Signature
 from typing import Any, Dict, Optional
 
-from mcp.server.fastmcp import FastMCP
+# 确保mcp包在Python路径中
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    # 如果在虚拟环境外运行，尝试添加虚拟环境路径
+    import os
+
+    venv_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        ".venv",
+        "Lib",
+        "site-packages",
+    )
+    if os.path.exists(venv_path):
+        sys.path.append(venv_path)
+        from mcp.server.fastmcp import FastMCP
+    else:
+        raise ImportError("无法导入mcp包。请确保已激活虚拟环境或安装了mcp包。")
 
 from app.logger import logger
 from app.tool.base import BaseTool
 from app.tool.bash import Bash
-from app.tool.browser_use_tool import BrowserUseTool
+
+# from app.tool.browser_use_tool import BrowserUseTool
 from app.tool.str_replace_editor import StrReplaceEditor
 from app.tool.terminate import Terminate
 
@@ -30,7 +47,7 @@ class MCPServer:
 
         # Initialize standard tools
         self.tools["bash"] = Bash()
-        self.tools["browser"] = BrowserUseTool()
+        # self.tools["browser"] = BrowserUseTool()
         self.tools["editor"] = StrReplaceEditor()
         self.tools["terminate"] = Terminate()
 

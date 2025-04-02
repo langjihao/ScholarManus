@@ -60,14 +60,16 @@ class MCPClients(ToolCollection):
 
         await self._initialize_and_list_tools()
 
-    async def connect_stdio(self, command: str, args: List[str]) -> None:
+    async def connect_stdio(
+        self, command: str, args: List[str], env: dict[str, str] | None = None
+    ) -> None:
         """Connect to an MCP server using stdio transport."""
         if not command:
             raise ValueError("Server command is required.")
         if self.session:
             await self.disconnect()
 
-        server_params = StdioServerParameters(command=command, args=args)
+        server_params = StdioServerParameters(command=command, args=args, env=env)
         stdio_transport = await self.exit_stack.enter_async_context(
             stdio_client(server_params)
         )
