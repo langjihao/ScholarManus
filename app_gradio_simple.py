@@ -113,14 +113,47 @@ def process_message(message, history):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    # 创建初始消息
+    history = history + [{"role": "user", "content": message}]
+
+    # 添加一个加载状态提示
+    loading_message = "正在思考中，请稍候..."
+    history = history + [{"role": "assistant", "content": loading_message}]
+
     try:
         # 初始化并运行MCP代理
         result = loop.run_until_complete(mcp_runner.run_prompt(message))
-        return {"role": "assistant", "content": result}
+
+        # 格式化响应内容
+        formatted_result = result
+
+        # 如果响应为空，提供友好提示
+        if not formatted_result or formatted_result.strip() == "":
+            formatted_result = "抱歉，我无法生成有效的回答。请尝试重新表述您的问题。"
+
+        # 更新历史记录
+        history[-1]["content"] = formatted_result
+        return history
     except Exception as e:
-        error_message = f"处理消息时出错: {str(e)}"
-        logger.error(error_message)
-        return {"role": "assistant", "content": error_message}
+        # 提供更友好的错误信息
+        error_type = type(e).__name__
+        error_message = str(e)
+
+        user_friendly_message = "处理您的请求时遇到了问题。"
+
+        # 根据错误类型提供更具体的信息
+        if "ConnectionError" in error_type or "Timeout" in error_type:
+            user_friendly_message += (
+                "可能是网络连接问题，请检查您的网络连接并稍后再试。"
+            )
+        elif "ValueError" in error_type:
+            user_friendly_message += "您的输入可能有误，请尝试重新表述您的问题。"
+        else:
+            user_friendly_message += f"错误详情: {error_message}"
+
+        logger.error(f"处理消息时出错: {error_type} - {error_message}")
+        history[-1]["content"] = user_friendly_message
+        return history
     finally:
         loop.close()
 

@@ -135,85 +135,128 @@ class MCPAgent(ToolCallAgent):
         return added_tools, removed_tools
 
     def _needs_user_input(self, message: str) -> Tuple[bool, str]:
-        """检测消息是否需要用户输入
+        """检测消息是否需要用户输入，增强版
+
+        使用多种方法判断消息是否需要用户输入，包括：
+        1. 问句检测（问号、疑问词）
+        2. 指令性语句检测（请提供、请告诉我等）
+        3. 上下文分析（排除修辞性问句）
+
+        Args:
+            message: 需要检测的消息内容
 
         Returns:
             Tuple[bool, str]: (是否需要输入, 阻塞原因)
         """
-        # 简单检测是否包含问号
-        if "?" not in message:
-            logger.debug(f"消息不包含问号: {message}")
-            return False, ""
-
-        logger.debug(f"检测到问号: {message}")
-
-        # 提取包含问号的句子
         import re
 
-        questions = re.findall(r"[^.!?]*\?", message)
-        logger.debug(f"提取到的问题: {questions}")
-
-        # 更宽松的过滤条件，只过滤明确的修辞性问句
-        filtered_questions = []
-        for q in questions:
-            # 跳过明确的修辞性问句
-            if any(
-                phrase in q.lower()
-                for phrase in [
-                    "请告诉我" "是不是很",
-                    "不是吗？",
-                    "对吧？",
-                    "对不对？",
-                    "wouldn't you agree",
-                    "isn't it",
-                    "doesn't it",
-                    "don't you think",
-                ]
-            ):
-                logger.debug(f"跳过明确的修辞性问句: {q}")
-                continue
-
-            # 检查是否包含常见的问题词
-            common_question_words = [
-                "什么",
-                "如何",
-                "为什么",
-                "怎么",
-                "哪些",
-                "何时",
-                "谁",
-                "哪里",
-                "what",
-                "how",
-                "why",
-                "when",
-                "who",
-                "where",
-                "which",
-            ]
-
-            # 如果包含常见问题词或问句较长（可能是实质性问题），则保留
-            if any(word in q.lower() for word in common_question_words) or len(q) > 10:
-                filtered_questions.append(q)
-                logger.debug(f"保留问题: {q}")
-            else:
-                logger.debug(f"跳过不明确的短问句: {q}")
-
-        # 如果没有过滤出问题，但原始问题列表不为空，则保留第一个问题
-        # 这是为了确保至少有一个问题被处理
-        if not filtered_questions and questions:
-            filtered_questions = [questions[0]]
-            logger.debug(f"没有明确的问题，保留第一个问题: {questions[0]}")
-
-        logger.debug(f"过滤后的问题: {filtered_questions}")
-
-        if not filtered_questions:
-            logger.debug("没有需要用户输入的问题")
+        # 如果消息为空，不需要用户输入
+        if not message or not message.strip():
             return False, ""
 
-        # 组合所有问题作为阻塞原因
-        block_reason = " ".join(filtered_questions)
-        logger.debug(f"需要用户输入，原因: {block_reason}")
+        # 直接检查是否包含问号（包括中英文问号）
+        has_question_mark = "?" in message or "？" in message
+
+        # 预处理：分割成句子进行分析
+        # 使用更复杂的正则表达式来正确分割句子，同时处理中英文标点
+        sentences = re.split(r"(?<=[.!?。！？])\s*", message.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        if not sentences:
+            return False, ""
+
+        # 定义各类判断标准
+
+        # 1. 明确的指令性语句，直接要求用户提供信息
+        instruction_patterns = [
+            r"请(?:问|提供|输入|告诉|说明|描述|指定|选择|确认|回答|解释|分享|上传)",
+            r"(?:提供|输入|告诉|说明|描述|指定|选择|确认)(?:一下|下)",
+            r"(?:能|可以|可否|请)(?:告诉|提供|说明|描述|解释)",
+            r"有(?:什么|何|哪些)(?:.{0,10})?(?:问题|疑问|不明白的)",
+            r"(?:please|kindly|could you|can you|would you)(?:\s+\w+)?\s+(?:provide|tell|share|explain|describe|confirm|specify|select|input)",
+            r"(?:need|require|want)(?:\s+\w+)?\s+(?:your|the|some|more)(?:\s+\w+)?\s+(?:input|information|details|clarification|confirmation)",
+            r"how can I help",
+        ]
+
+        # 2. 常见疑问词和疑问句模式（不仅仅是开头）
+        question_patterns = [
+            # 中文疑问词
+            r"(?:什么|如何|怎么|怎样|为什么|为何|哪些|哪个|哪里|何时|何地|谁|是否)",
+            r"(?:能否|可否|是否)(?:\s+\w+)?",
+            r"有(?:什么|哪些)(?:.{0,15})?(?:可以|能够|需要)",
+            r"请问",  # 添加"请问"作为明确的问句标识
+            # 英文疑问词
+            r"(?:what|how|why|when|where|which|who|whom|whose)",
+            r"(?:do|does|did|is|are|was|were|have|has|had|can|could|will|would|should|shall|may|might)\s+(?:you|i|we|they|he|she|it)",
+        ]
+
+        # 3. 明确的修辞性问句，不需要用户回答
+        rhetorical_patterns = [
+            r"(?:不是吗|对吧|对不对|是不是|是吧|不是吗|难道不|难道|不是么)",
+            r"(?:wouldn\'t you agree|isn\'t it|doesn\'t it|don\'t you think|right\?)",
+            r"(?:想象一下|假设|假如|如果).*[?？]",
+            r"(?:imagine|suppose|what if|assuming).*[?？]",
+        ]
+
+        # 存储需要用户输入的句子
+        user_input_sentences = []
+
+        # 分析每个句子
+        for sentence in sentences:
+            # 跳过太短的句子（可能是噪音）
+            if len(sentence) < 3:
+                continue
+
+            # 检查是否是问句（包含问号，包括中英文问号）
+            is_question = "?" in sentence or "？" in sentence
+
+            # 检查是否包含指令性语句
+            has_instruction = any(
+                re.search(pattern, sentence, re.IGNORECASE)
+                for pattern in instruction_patterns
+            )
+
+            # 检查是否包含疑问词或疑问句模式（不仅仅检查开头）
+            has_question_pattern = any(
+                re.search(pattern, sentence, re.IGNORECASE)
+                for pattern in question_patterns
+            )
+
+            # 检查是否是修辞性问句
+            is_rhetorical = any(
+                re.search(pattern, sentence, re.IGNORECASE)
+                for pattern in rhetorical_patterns
+            )
+
+            # 判断逻辑：
+            # 1. 如果是明确的指令性语句，需要用户输入
+            # 2. 如果是问句且不是修辞性问句，需要用户输入
+            # 3. 如果包含疑问词或疑问句模式且不是修辞性问句，需要用户输入
+            if (
+                has_instruction
+                or (is_question and not is_rhetorical)
+                or (has_question_pattern and not is_rhetorical)
+            ):
+                user_input_sentences.append(sentence)
+
+        # 特殊情况：如果整个消息包含问号但没有找到需要用户输入的句子
+        # 这可能是因为句子分割不正确或者其他原因
+        if has_question_mark and not user_input_sentences:
+            # 尝试找出包含问号的部分作为需要用户输入的句子
+            question_parts = re.findall(r"[^.!?。！？]*[?？][^.!?。！？]*", message)
+            for part in question_parts:
+                if len(part.strip()) > 3 and not any(
+                    re.search(pattern, part, re.IGNORECASE)
+                    for pattern in rhetorical_patterns
+                ):
+                    user_input_sentences.append(part.strip())
+
+        # 如果没有找到需要用户输入的句子
+        if not user_input_sentences:
+            return False, ""
+
+        # 组合所有需要用户输入的句子作为阻塞原因
+        block_reason = " ".join(user_input_sentences)
         return True, block_reason
 
     async def think(self) -> bool:
@@ -240,16 +283,11 @@ class MCPAgent(ToolCallAgent):
         if result and len(self.memory.messages) > 0:
             last_message = self.memory.messages[-1]
             if last_message.role == "assistant" and last_message.content:
-                logger.debug(
-                    f"检查最后一条消息是否需要用户输入: {last_message.content}"
-                )
                 needs_input, block_reason = self._needs_user_input(last_message.content)
                 if needs_input:
                     # 进入阻塞状态
                     self.block(reason=block_reason, require_user_input=True)
                     logger.info(f"Agent自动进入阻塞状态: {block_reason}")
-                else:
-                    logger.debug("最后一条消息不需要用户输入")
             else:
                 logger.debug(
                     f"最后一条消息不是assistant或没有内容: {last_message.role}"

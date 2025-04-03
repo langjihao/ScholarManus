@@ -180,28 +180,67 @@ def process_message(message, history):
     task_thread.start()
 
     start_time = time.time()
-    response = ""
+    full_response = ""
+
+    # 创建初始消息
+    history = history + [{"role": "user", "content": message}]
+    history = history + [{"role": "assistant", "content": ""}]
+    yield history
+
+    # 用于跟踪是否已经开始接收实际响应
+    response_started = False
 
     while task_thread.is_alive() or not log_queue.empty():
         # 超时检查
         if time.time() - start_time > PROCESS_TIMEOUT:
-            response += "\n[错误] 处理超时\n"
-            yield {"role": "assistant", "content": response}
+            if not response_started:
+                full_response = "处理请求超时，请稍后再试或尝试简化您的问题。"
+            else:
+                full_response += "\n\n(处理超时，响应可能不完整)"
+            history[-1]["content"] = full_response
+            yield history
             break
 
         try:
             new_content = log_queue.get(timeout=0.1)
-            response += new_content
-            yield {"role": "assistant", "content": response}
+            if new_content:
+                # 过滤掉不必要的系统日志信息
+                if "INFO" in new_content and (
+                    "Token usage" in new_content or "Executing step" in new_content
+                ):
+                    continue
+
+                # 检测是否包含思考内容
+                if "✨ mcp_agent's thoughts:" in new_content:
+                    # 提取思考内容并格式化
+                    thought = new_content.split("✨ mcp_agent's thoughts:")[1].strip()
+                    if not response_started:
+                        full_response = thought
+                        response_started = True
+                    else:
+                        full_response += "\n\n" + thought
+                else:
+                    # 普通内容
+                    if not response_started and new_content.strip():
+                        response_started = True
+
+                    if response_started:
+                        full_response += new_content
+
+                # 更新历史记录
+                history[-1]["content"] = full_response
+                yield history
         except queue.Empty:
             pass
 
         # 无新内容时暂停
         time.sleep(0.1)
 
-    # 最终确认
-    response += "\n[完成] 处理结束\n"
-    yield {"role": "assistant", "content": response}
+    # 如果没有实际响应，添加一个友好的提示
+    if not response_started:
+        full_response = "我正在处理您的请求，但目前没有生成有效的响应。请尝试重新提问或换一种表述方式。"
+        history[-1]["content"] = full_response
+        yield history
 
 
 def create_file_viewer():
