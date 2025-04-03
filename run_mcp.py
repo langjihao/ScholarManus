@@ -6,6 +6,7 @@ import sys
 from app.agent.mcp import MCPAgent
 from app.config import config
 from app.logger import logger
+from app.schema import AgentState
 
 
 class MCPRunner:
@@ -38,16 +39,49 @@ class MCPRunner:
     async def run_interactive(self) -> None:
         """Run the agent in interactive mode."""
         print("\nMCP Agent Interactive Mode (type 'exit' to quit)\n")
+
+        # 初始提示
+        user_input = input("\nEnter your request: ")
+        if user_input.lower() in ["exit", "quit", "q"]:
+            return
+
         while True:
-            user_input = input("\nEnter your request: ")
-            if user_input.lower() in ["exit", "quit", "q"]:
-                break
+            # 运行Agent
             response = await self.agent.run(user_input)
             print(f"\nAgent: {response}")
 
+            # 检查Agent是否被阻塞
+            if self.agent.state == AgentState.BLOCKED:
+                print(f"\n[Agent需要更多信息]: {self.agent.block_reason}")
+                user_input = input("\n您的回复: ")
+
+                if user_input.lower() in ["exit", "quit", "q"]:
+                    break
+
+                # 解除阻塞并继续
+                self.agent.unblock(user_input)
+            else:
+                # 正常情况下获取下一个输入
+                user_input = input("\nEnter your request: ")
+                if user_input.lower() in ["exit", "quit", "q"]:
+                    break
+
     async def run_single_prompt(self, prompt: str) -> None:
         """Run the agent with a single prompt."""
-        await self.agent.run(prompt)
+        response = await self.agent.run(prompt)
+        print(f"\nAgent: {response}")
+
+        # 处理可能的阻塞状态
+        while self.agent.state == AgentState.BLOCKED:
+            print(f"\n[Agent需要更多信息]: {self.agent.block_reason}")
+            user_input = input("\n您的回复: ")
+
+            if user_input.lower() in ["exit", "quit", "q"]:
+                break
+
+            self.agent.unblock(user_input)
+            response = await self.agent.run()
+            print(f"\nAgent: {response}")
 
     async def run_default(self) -> None:
         """Run the agent in default mode."""
@@ -57,7 +91,21 @@ class MCPRunner:
             return
 
         logger.warning("Processing your request...")
-        await self.agent.run(prompt)
+        response = await self.agent.run(prompt)
+        print(f"\nAgent: {response}")
+
+        # 处理可能的阻塞状态
+        while self.agent.state == AgentState.BLOCKED:
+            print(f"\n[Agent需要更多信息]: {self.agent.block_reason}")
+            user_input = input("\n您的回复: ")
+
+            if user_input.lower() in ["exit", "quit", "q"]:
+                break
+
+            self.agent.unblock(user_input)
+            response = await self.agent.run()
+            print(f"\nAgent: {response}")
+
         logger.info("Request processing completed.")
 
     async def cleanup(self) -> None:

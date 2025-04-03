@@ -34,6 +34,7 @@ class AgentState(str, Enum):
 
     IDLE = "IDLE"
     RUNNING = "RUNNING"
+    BLOCKED = "BLOCKED"  # 新增：阻塞状态，等待用户输入
     FINISHED = "FINISHED"
     ERROR = "ERROR"
 

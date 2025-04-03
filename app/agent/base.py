@@ -40,6 +40,14 @@ class BaseAgent(BaseModel, ABC):
     max_steps: int = Field(default=10, description="Maximum steps before termination")
     current_step: int = Field(default=0, description="Current step in execution")
 
+    # Block state control
+    block_reason: Optional[str] = Field(
+        None, description="Reason why the agent is blocked"
+    )
+    user_input_required: bool = Field(
+        False, description="Whether user input is required to unblock"
+    )
+
     duplicate_threshold: int = 2
 
     class Config:
@@ -70,7 +78,7 @@ class BaseAgent(BaseModel, ABC):
         """
         if not isinstance(new_state, AgentState):
             raise ValueError(f"Invalid state: {new_state}")
-
+        logger.info(f"Transitioning agent state to: {new_state}")
         previous_state = self.state
         self.state = new_state
         try:
@@ -113,6 +121,40 @@ class BaseAgent(BaseModel, ABC):
         kwargs = {"base64_image": base64_image, **(kwargs if role == "tool" else {})}
         self.memory.add_message(message_map[role](content, **kwargs))
 
+    def block(self, reason: str, require_user_input: bool = True) -> None:
+        """Block the agent execution and wait for user input or external trigger.
+
+        Args:
+            reason: The reason why the agent is blocked
+            require_user_input: Whether user input is required to unblock
+        """
+        self.state = AgentState.BLOCKED
+        self.block_reason = reason
+        self.user_input_required = require_user_input
+        logger.info(f"Agent blocked: {reason}")
+
+    def unblock(self, user_input: Optional[str] = None) -> None:
+        """Unblock the agent and continue execution.
+
+        Args:
+            user_input: Optional user input to add to memory
+        """
+        if self.state != AgentState.BLOCKED:
+            logger.warning(
+                f"Attempted to unblock agent that is not blocked (current state: {self.state})"
+            )
+            return
+
+        # 如果提供了用户输入，添加到内存中
+        if user_input:
+            self.update_memory("user", user_input)
+
+        # 恢复到运行状态
+        self.state = AgentState.RUNNING
+        self.block_reason = None
+        self.user_input_required = False
+        logger.info("Agent unblocked and continuing execution")
+
     async def run(self, request: Optional[str] = None) -> str:
         """Execute the agent's main loop asynchronously.
 
@@ -125,32 +167,57 @@ class BaseAgent(BaseModel, ABC):
         Raises:
             RuntimeError: If the agent is not in IDLE state at start.
         """
-        if self.state != AgentState.IDLE:
+        if self.state != AgentState.IDLE and self.state != AgentState.BLOCKED:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
-        if request:
+        # 如果是从IDLE状态开始，处理初始请求
+        if self.state == AgentState.IDLE and request:
             self.update_memory("user", request)
 
         results: List[str] = []
+
+        # 如果是从BLOCKED状态恢复，记录这一点
+        if self.state == AgentState.BLOCKED:
+            results.append(f"Resuming from blocked state: {self.block_reason}")
+            self.state = AgentState.RUNNING  # 手动设置为RUNNING状态
+
         async with self.state_context(AgentState.RUNNING):
             while (
-                self.current_step < self.max_steps and self.state != AgentState.FINISHED
+                self.current_step < self.max_steps
+                and self.state != AgentState.FINISHED
+                and self.state != AgentState.BLOCKED  # 新增：检查是否进入阻塞状态
             ):
                 self.current_step += 1
                 logger.info(f"Executing step {self.current_step}/{self.max_steps}")
                 step_result = await self.step()
 
-                # Check for stuck state
+                # 检查是否进入阻塞状态
+                if self.state == AgentState.BLOCKED:
+                    results.append(f"Step {self.current_step}: {step_result}")
+                    results.append(f"Blocked: {self.block_reason}")
+                    if self.user_input_required:
+                        results.append("Waiting for user input to continue")
+                    break  # 跳出循环，暂停执行
+
+                # 检查是否陷入循环
                 if self.is_stuck():
                     self.handle_stuck_state()
 
                 results.append(f"Step {self.current_step}: {step_result}")
 
-            if self.current_step >= self.max_steps:
+            # 处理循环结束的原因
+            if self.current_step >= self.max_steps and self.state != AgentState.BLOCKED:
                 self.current_step = 0
                 self.state = AgentState.IDLE
                 results.append(f"Terminated: Reached max steps ({self.max_steps})")
-        await SANDBOX_CLIENT.cleanup()
+            elif self.state == AgentState.BLOCKED:
+                # 保持当前步数，以便恢复时继续
+                pass
+
+        # 只有在非阻塞状态下才清理资源
+        if self.state != AgentState.BLOCKED:
+            await SANDBOX_CLIENT.cleanup()
+
         return "\n".join(results) if results else "No steps executed"
 
     @abstractmethod

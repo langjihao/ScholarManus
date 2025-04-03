@@ -134,6 +134,88 @@ class MCPAgent(ToolCallAgent):
 
         return added_tools, removed_tools
 
+    def _needs_user_input(self, message: str) -> Tuple[bool, str]:
+        """检测消息是否需要用户输入
+
+        Returns:
+            Tuple[bool, str]: (是否需要输入, 阻塞原因)
+        """
+        # 简单检测是否包含问号
+        if "?" not in message:
+            logger.debug(f"消息不包含问号: {message}")
+            return False, ""
+
+        logger.debug(f"检测到问号: {message}")
+
+        # 提取包含问号的句子
+        import re
+
+        questions = re.findall(r"[^.!?]*\?", message)
+        logger.debug(f"提取到的问题: {questions}")
+
+        # 更宽松的过滤条件，只过滤明确的修辞性问句
+        filtered_questions = []
+        for q in questions:
+            # 跳过明确的修辞性问句
+            if any(
+                phrase in q.lower()
+                for phrase in [
+                    "请告诉我" "是不是很",
+                    "不是吗？",
+                    "对吧？",
+                    "对不对？",
+                    "wouldn't you agree",
+                    "isn't it",
+                    "doesn't it",
+                    "don't you think",
+                ]
+            ):
+                logger.debug(f"跳过明确的修辞性问句: {q}")
+                continue
+
+            # 检查是否包含常见的问题词
+            common_question_words = [
+                "什么",
+                "如何",
+                "为什么",
+                "怎么",
+                "哪些",
+                "何时",
+                "谁",
+                "哪里",
+                "what",
+                "how",
+                "why",
+                "when",
+                "who",
+                "where",
+                "which",
+            ]
+
+            # 如果包含常见问题词或问句较长（可能是实质性问题），则保留
+            if any(word in q.lower() for word in common_question_words) or len(q) > 10:
+                filtered_questions.append(q)
+                logger.debug(f"保留问题: {q}")
+            else:
+                logger.debug(f"跳过不明确的短问句: {q}")
+
+        # 如果没有过滤出问题，但原始问题列表不为空，则保留第一个问题
+        # 这是为了确保至少有一个问题被处理
+        if not filtered_questions and questions:
+            filtered_questions = [questions[0]]
+            logger.debug(f"没有明确的问题，保留第一个问题: {questions[0]}")
+
+        logger.debug(f"过滤后的问题: {filtered_questions}")
+
+        if not filtered_questions:
+            logger.debug("没有需要用户输入的问题")
+            return False, ""
+
+        # 组合所有问题作为阻塞原因
+        block_reason = " ".join(filtered_questions)
+        logger.debug(f"需要用户输入，原因: {block_reason}")
+        return True, block_reason
+
     async def think(self) -> bool:
         """Process current state and decide next action."""
         # Check MCP session and tools availability
@@ -152,7 +234,32 @@ class MCPAgent(ToolCallAgent):
                 return False
 
         # Use the parent class's think method
-        return await super().think()
+        result = await super().think()
+
+        # 检查最后一条消息是否需要用户输入
+        if result and len(self.memory.messages) > 0:
+            last_message = self.memory.messages[-1]
+            if last_message.role == "assistant" and last_message.content:
+                logger.debug(
+                    f"检查最后一条消息是否需要用户输入: {last_message.content}"
+                )
+                needs_input, block_reason = self._needs_user_input(last_message.content)
+                if needs_input:
+                    # 进入阻塞状态
+                    self.block(reason=block_reason, require_user_input=True)
+                    logger.info(f"Agent自动进入阻塞状态: {block_reason}")
+                else:
+                    logger.debug("最后一条消息不需要用户输入")
+            else:
+                logger.debug(
+                    f"最后一条消息不是assistant或没有内容: {last_message.role}"
+                )
+        else:
+            logger.debug(
+                f"没有结果或没有消息: result={result}, messages={len(self.memory.messages)}"
+            )
+
+        return result
 
     async def _handle_special_tool(self, name: str, result: Any, **kwargs) -> None:
         """Handle special tool execution and state changes"""
