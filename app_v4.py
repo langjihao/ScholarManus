@@ -55,18 +55,6 @@ class MCPRunner:
             logger.info("Connected to FireCrawl MCP service via SSE")
         except Exception as e:
             logger.error(f"Error initializing MCP agent: {str(e)}")
-            # 尝试直接使用 stdio 连接
-            try:
-                await self.agent.initialize(
-                    connection_type="stdio",
-                    command="npx",
-                    args=["-y", "firecrawl-mcp"],
-                    env={"FIRECRAWL_API_KEY": "fc-952fa073ed8b421cbc982d896ad51da2"},
-                )
-                logger.info("Connected to MCP server via stdio")
-            except Exception as e2:
-                logger.error(f"Failed to connect via stdio as well: {str(e2)}")
-                raise
 
     async def run_interactive(self) -> None:
         """Run the agent in interactive mode."""

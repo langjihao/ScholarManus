@@ -4,7 +4,11 @@ from pydantic import Field
 
 from app.agent.toolcall import ToolCallAgent
 from app.logger import logger
-from app.prompt.mcp import MULTIMEDIA_RESPONSE_PROMPT, NEXT_STEP_PROMPT, SYSTEM_PROMPT
+from app.prompt.professor_mcp import (
+    MULTIMEDIA_RESPONSE_PROMPT,
+    NEXT_STEP_PROMPT,
+    SYSTEM_PROMPT,
+)
 from app.schema import AgentState, Message
 from app.tool.base import ToolResult
 from app.tool.mcp import MCPClients
@@ -17,7 +21,7 @@ class MCPAgent(ToolCallAgent):
     and makes the server's tools available through the agent's tool interface.
     """
 
-    name: str = "mcp_agent"
+    name: str = "ScholarManus"
     description: str = "An agent that connects to an MCP server and uses its tools."
 
     system_prompt: str = SYSTEM_PROMPT
@@ -27,7 +31,7 @@ class MCPAgent(ToolCallAgent):
     mcp_clients: MCPClients = Field(default_factory=MCPClients)
     available_tools: MCPClients = None  # Will be set in initialize()
 
-    max_steps: int = 40
+    max_steps: int = 20
     connection_type: str = "stdio"  # "stdio" or "sse"
 
     # Track tool schemas to detect changes
@@ -257,7 +261,7 @@ class MCPAgent(ToolCallAgent):
 
         # 组合所有需要用户输入的句子作为阻塞原因
         block_reason = " ".join(user_input_sentences)
-        return True, block_reason
+        return False, block_reason
 
     async def think(self) -> bool:
         """Process current state and decide next action."""

@@ -25,14 +25,10 @@ class MCPRunner:
         """Initialize the MCP agent with the appropriate connection."""
         logger.info(f"Initializing MCPAgent with {connection_type} connection...")
 
-        if connection_type == "stdio":
-            await self.agent.initialize(
-                connection_type="stdio",
-                command=sys.executable,
-                args=["-m", self.server_reference],
-            )
-        else:  # sse
-            await self.agent.initialize(connection_type="sse", server_url=server_url)
+        await self.agent.initialize(
+            connection_type="sse",
+            server_url="http://localhost:8000/sse",
+        )
 
         logger.info(f"Connected to MCP server via {connection_type}")
 
@@ -138,6 +134,18 @@ def parse_args() -> argparse.Namespace:
 
 async def run_mcp() -> None:
     """Main entry point for the MCP runner."""
+    # 打印ScholarManus字符画
+    print(
+        r"""
+   _____      __          __           __  ___
+  / ___/_____/ /_  ____  / /___ ______/  |/  /___ _____  __  _______
+  \__ \/ ___/ __ \/ __ \/ / __ `/ ___/ /|_/ / __ `/ __ \/ / / / ___/
+ ___/ / /__/ / / / /_/ / / /_/ / /  / /  / / /_/ / / / / /_/ (__  )
+/____/\___/_/ /_/\____/_/\__,_/_/  /_/  /_/\__,_/_/ /_/\__,_/____/
+
+    """
+    )
+
     args = parse_args()
     runner = MCPRunner()
 
